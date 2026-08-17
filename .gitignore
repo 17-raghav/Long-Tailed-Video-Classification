@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# data and cached features
+*.parquet
+*.zip
+*.avi
+*.mp4
+ucf101/
+dl/
+results.json
