@@ -8,7 +8,7 @@ classes when you train on an imbalanced catalog, and whether the standard fixes
 for imbalance actually work.
 
 **A plain MLP on mean-pooled frames beats a 2-block temporal transformer on
-every metric, including a 24-point margin on rare classes — with no class
+every metric, including a 24-point margin on rare classes - with no class
 weighting at all. The transformer's apparent "imbalance amplification" was
 over-parameterisation, not a property of supervised learning. That is also why
 class-balanced reweighting and focal loss both failed: they target the loss
@@ -35,7 +35,7 @@ Project_3.ipynb  run + results
 
 Stock UCF-101 is close to balanced, so an imbalance audit on it finds nothing.
 `make_long_tailed` resamples it with exponential decay (the CIFAR-LT recipe from
-Cui et al. 2019). Classes with fewer than 8 clips are dropped — below that a
+Cui et al. 2019). Classes with fewer than 8 clips are dropped - below that a
 class gets one test clip and its accuracy is a coin flip, which makes
 worst-group accuracy meaningless.
 
@@ -55,11 +55,11 @@ All models sit on the same frozen CLIP features and the same 70/30 split.
 | Temporal transformer + class-balanced | ~6M | 0.9312 | 0.7855 | 0.9628 | 0.5625 | 5 |
 | Temporal transformer + focal (γ=2) | ~6M | 0.9330 | 0.7764 | 0.9767 | 0.5625 | 5 |
 | Mean-pool + plain logistic | ~26K | 0.8554 | 0.4653 | 0.9873 | 0.0312 | 23 |
-| Zero-shot CLIP (no training) | 0 | 0.8025 | 0.7039 | 0.7905 | 0.5938 | — |
+| Zero-shot CLIP (no training) | 0 | 0.8025 | 0.7039 | 0.7905 | 0.5938 | - |
 
 MLP figures are means over 5 seeds: **macro 0.8951 ± 0.0046, tail 0.8375 ±
 0.0125**, head identical (0.9930) in all five. Transformer figures are single
-runs — but the 0.244 tail gap is ~19× the MLP's seed-to-seed standard
+runs - but the 0.244 tail gap is ~19× the MLP's seed-to-seed standard
 deviation, so seed variance cannot account for it.
 
 Head/tail are the top and bottom third of classes by training frequency.
@@ -81,7 +81,7 @@ resampling, not a measured gain. See "Validation of the evaluation itself".
 
 **Capacity, not the loss function, drives rare-class failure.** The MLP has
 roughly 20× fewer parameters than the transformer and beats it by 24 points on
-the tail — using no class weighting at all. The transformer has ~6M parameters
+the tail - using no class weighting at all. The transformer has ~6M parameters
 and 1,346 training examples across 50 classes: 27 per class on average, 6 for
 the rare ones. It memorises the head and has nothing left over.
 
@@ -92,7 +92,7 @@ unweighted MLP outperforms the weighted transformer on every metric, which is
 the cleanest possible demonstration that the loss function was never the
 binding constraint.
 
-**Weighting matters enormously — for the right model.** On mean-pooled
+**Weighting matters enormously - for the right model.** On mean-pooled
 features, switching plain logistic regression to class-balanced weighting takes
 the tail from **0.0312 to 0.7812**. So class weighting is not useless; it was
 being applied to a model whose problem it could not address.
@@ -109,7 +109,7 @@ temporal modelling in general.
 
 **Zero-shot CLIP remains the useful control.** It never saw the training
 distribution, so it cannot carry a class-frequency bias. Its tail accuracy is
-0.5938. The transformer, after supervised training, also reaches 0.5938 — no
+0.5938. The transformer, after supervised training, also reaches 0.5938 - no
 gain. The MLP reaches 0.8375. So supervised training *does* improve rare
 classes substantially, by roughly 24 points over zero-shot, provided the model
 is appropriately sized.
@@ -121,8 +121,8 @@ is appropriately sized.
 | YoYo | 8 | 0.00 | 0.00 | recovered |
 | PommelHorse | 6 | 0.00 | 0.00 | recovered |
 | RopeClimbing | 6 | 0.00 | 0.00 | recovered |
-| StillRings | 6 | 0.00 | 0.00 | — |
-| JavelinThrow | 6 | 0.50 | 0.00 | — |
+| StillRings | 6 | 0.00 | 0.00 | - |
+| JavelinThrow | 6 | 0.50 | 0.00 | - |
 
 Only **2** classes remain at zero under the MLP, in all five seeds. Three of the
 five apparent "representation failures" were model failures: frozen CLIP *can*
@@ -132,7 +132,7 @@ examples.
 This retires an earlier claim in this project that four classes were
 irrecoverable because zero-shot CLIP also scored 0.00 on them. Scoring zero
 under zero-shot turns out to be weak evidence about what a properly-sized
-supervised head can do — the prompt template is a much cruder classifier than a
+supervised head can do - the prompt template is a much cruder classifier than a
 trained probe.
 
 ## Validation of the evaluation itself
@@ -170,7 +170,7 @@ head nor tail.
 
 Effect on the conclusions: issues 1–3 enlarge the uncertainty on any single
 tail figure. They do **not** threaten the MLP-vs-transformer result, which is a
-0.244 gap against a measured seed-to-seed standard deviation of 0.0125 — 19×
+0.244 gap against a measured seed-to-seed standard deviation of 0.0125 - 19×
 larger. They do mean no individual tail number should be quoted to four
 decimals.
 
@@ -184,7 +184,7 @@ Features cache to Parquet so model iterations don't re-run CLIP.
 | pandas, `read_parquet(columns=["label"])` | 2.2 ms |
 | pandas, naive `read_parquet()` | 665.1 ms |
 
-The 560× gap against naive pandas is column pruning, not engine speed — a pandas
+The 560× gap against naive pandas is column pruning, not engine speed - a pandas
 caller who passes `columns=` recovers nearly all of it. 1.8× against
 equally well-written pandas is the honest comparison.
 
@@ -193,28 +193,28 @@ equally well-written pandas is the honest comparison.
 - **Neither model was hyperparameter-tuned.** The transformer used its defaults
   (2 blocks, d=512, 30 epochs, AdamW 1e-3) and the MLP used sklearn's. The
   honest claim is that under matched, untuned conditions the simpler model wins
-  — not that transformers are unsuited to this task. A tuned, smaller
+  - not that transformers are unsuited to this task. A tuned, smaller
   transformer might well close the gap, and testing that is the obvious next
   step.
 - **Transformer results are single runs**; only the MLP was seed-replicated
   (5 seeds). The 0.244 tail gap is 19× the MLP's seed standard deviation, so
   seed variance cannot plausibly explain it, but the transformer's own variance
   is unmeasured.
-- **The MLP-vs-transformer comparison changes two things at once** — pooling
+- **The MLP-vs-transformer comparison changes two things at once** - pooling
   and architecture. It shows a mean-pooled MLP wins; it does not isolate how
   much of that is discarding frame order versus reducing capacity. A
   mean-pooled transformer, or a sequence MLP, would separate them.
 - **The tail rests on 32 test clips** across 16 classes, 2 clips each, so the
   metric's resolution is 3.1 points and no tail figure should be quoted to four
   decimals.
-- **The tail/head split is tie-broken arbitrarily** — 19 classes share the same
+- **The tail/head split is tie-broken arbitrarily** - 19 classes share the same
   training count and only 16 fit in the tail. Fixing this properly means either
   reporting all classes below a frequency threshold rather than a fixed count,
   or averaging over tie-break choices.
 - **The imbalance is constructed**, not naturally occurring.
 - 50 of 101 classes, capped for runtime.
 - Frozen encoder throughout. The 2 remaining zero-accuracy classes are the only
-  candidates for genuine representation failure, and even that is unproven —
+  candidates for genuine representation failure, and even that is unproven -
   fine-tuning CLIP was never attempted.
 - Single zero-shot prompt template, no prompt ensembling, so the zero-shot
   numbers are probably a slight underestimate.
