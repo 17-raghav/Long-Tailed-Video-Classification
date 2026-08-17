@@ -1,13 +1,3 @@
-"""
-Long-tailed video understanding on UCF-101.
-
-Frozen CLIP ViT-B/32 frame features -> temporal transformer -> class-imbalance
-audit, with a Parquet/Polars feature store.
-
-Feature extraction is the only expensive step. It runs once and caches to
-Parquet; everything downstream trains in seconds on the cached features.
-"""
-
 import os
 import time
 import json
@@ -20,16 +10,12 @@ import numpy as np
 SEED = 42
 N_FRAMES = 16
 IMBALANCE_FACTOR = 100
-MIN_CLASS_CLIPS = 8      # below this a class gets <2 test clips and can't be scored
-MAX_CLASSES = 50         # bounds runtime
+MIN_CLASS_CLIPS = 8
+MAX_CLASSES = 50
 
 FEATURE_STORE = "/content/drive/MyDrive/ucf101_lt/clip_features.parquet"
 RESULTS_JSON = "/content/drive/MyDrive/ucf101_lt/results.json"
 
-
-# ---------------------------------------------------------------------------
-# Data
-# ---------------------------------------------------------------------------
 def find_videos(root):
     """[(path, class_name)] for any nested layout. Parent dir is the label."""
     out = []
@@ -40,22 +26,11 @@ def find_videos(root):
 
 
 def make_long_tailed(items, imbalance_factor=IMBALANCE_FACTOR, seed=SEED):
-    """Resample a balanced set into an exponentially long-tailed one.
-
-        n_c = n_max * (1 / IF) ** (c / (C - 1))
-
-    Standard CIFAR-LT / ImageNet-LT construction (Cui et al. 2019) applied to
-    video. Returns the realised imbalance factor alongside the counts, since
-    the floor and the source pool size both clamp the tail and the realised
-    value is usually well below the requested one.
-    """
     rng = np.random.RandomState(seed)
     by_class = {}
     for path, cls in items:
         by_class.setdefault(cls, []).append(path)
 
-    # Classes below the floor can only score 0.0 or 1.0 on their single test
-    # clip, which makes worst-group accuracy noise. Also filters stray dirs.
     too_small = {c: len(v) for c, v in by_class.items() if len(v) < MIN_CLASS_CLIPS}
     if too_small:
         print(f"      dropping {len(too_small)} class(es) with < {MIN_CLASS_CLIPS} "
@@ -66,8 +41,6 @@ def make_long_tailed(items, imbalance_factor=IMBALANCE_FACTOR, seed=SEED):
 
     classes = sorted(by_class, key=lambda c: -len(by_class[c]))
 
-    # Evenly spaced slice across the size ordering, not the top N, so the full
-    # range of class sizes survives the cap.
     if len(classes) > MAX_CLASSES:
         pick = np.linspace(0, len(classes) - 1, MAX_CLASSES).astype(int)
         classes = [classes[i] for i in sorted(set(pick))]
@@ -94,7 +67,6 @@ def make_long_tailed(items, imbalance_factor=IMBALANCE_FACTOR, seed=SEED):
 
 
 def split_train_test(items, test_frac=0.3, seed=SEED):
-    """Stratified split so every class appears on both sides."""
     rng = np.random.RandomState(seed)
     by_class = {}
     for path, cls in items:
@@ -108,17 +80,7 @@ def split_train_test(items, test_frac=0.3, seed=SEED):
         train += [(paths[j], cls) for j in idx[n_test:]]
     return train, test
 
-
-# ---------------------------------------------------------------------------
-# Frames and features
-# ---------------------------------------------------------------------------
 def sample_frames(path, n=N_FRAMES):
-    """n evenly spaced frames as RGB arrays, or None if unreadable.
-
-    Seeks to each wanted frame rather than decoding the file start to finish.
-    A sequential read decodes ~175 frames to use 16, which across 13k clips is
-    over an hour of decoding before CLIP starts.
-    """
     import cv2
     cap = cv2.VideoCapture(path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -144,11 +106,6 @@ def sample_frames(path, n=N_FRAMES):
 
 
 def extract_features(items):
-    """Frozen CLIP ViT-B/32 -> (n_clips, N_FRAMES, 512).
-
-    Returns the model as well so the zero-shot baseline can reuse it instead of
-    loading a second copy.
-    """
     import torch
     import open_clip
     from PIL import Image
@@ -199,10 +156,6 @@ def load_feature_store(path=FEATURE_STORE):
     feats = np.array(df["feat"].to_list(), dtype=np.float32).reshape(-1, t, d)
     return feats, df["label"].to_list(), df["path"].to_list()
 
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
 def _humanise(name):
     """ApplyEyeMakeup -> apply eye makeup"""
     out = []
@@ -214,11 +167,6 @@ def _humanise(name):
 
 
 def zero_shot(feats, labels, classes, model=None):
-    """Match mean-pooled clip features against text prompts. No training.
-
-    Useful as a control: this model never saw the training distribution, so it
-    cannot carry a class-frequency bias.
-    """
     import torch
     import open_clip
 
@@ -241,8 +189,6 @@ def zero_shot(feats, labels, classes, model=None):
 
 
 class TemporalTransformer:
-    """Two-block transformer encoder over frozen frame features, CLS pooling."""
-
     def __init__(self, dim=512, n_classes=10, n_layers=2, n_heads=8, seed=SEED):
         import torch
         import torch.nn as nn
@@ -301,8 +247,6 @@ class TemporalTransformer:
 
 
 def _focal_loss(logits, target, gamma=2.0, weight=None):
-    """Lin et al. 2017. Down-weights easy examples so the gradient is dominated
-    by hard (typically rare-class) ones."""
     import torch.nn.functional as F
     logp = F.log_softmax(logits, dim=-1)
     logpt = logp.gather(1, target.unsqueeze(1)).squeeze(1)
@@ -313,22 +257,12 @@ def _focal_loss(logits, target, gamma=2.0, weight=None):
 
 
 def effective_number_weights(counts, beta=0.999):
-    """Class-balanced weights (Cui et al. 2019).
-
-    n near-duplicate clips are not n independent samples. The effective number
-    (1 - beta^n) / (1 - beta) saturates as n grows; weight by its inverse.
-    """
     n = np.asarray(counts, dtype=np.float64)
     eff = (1.0 - np.power(beta, n)) / (1.0 - beta)
     w = 1.0 / np.maximum(eff, 1e-8)
     return w / w.sum() * len(n)
 
-
-# ---------------------------------------------------------------------------
-# Evaluation
-# ---------------------------------------------------------------------------
 def _spearman(a, b):
-    """Rank correlation, numpy only."""
     def rank(x):
         x = np.asarray(x, dtype=float)
         r = np.empty(len(x), dtype=float)
@@ -346,16 +280,12 @@ def _spearman(a, b):
 
 
 def bias_audit(pred, y, classes, train_counts):
-    """Per-class accuracy, worst group, head vs tail, and the correlation
-    between class training frequency and class accuracy."""
     per_class, n_eval = {}, {}
     for i, c in enumerate(classes):
         m = (y == i)
         n_eval[c] = int(m.sum())
         per_class[c] = float((pred[m] == y[m]).mean()) if m.sum() else float("nan")
 
-    # NaN comparisons are always False, so min() over a dict containing NaN
-    # returns whatever it saw first. Exclude unscored classes explicitly.
     scored = {c: v for c, v in per_class.items() if not np.isnan(v)}
     if len(scored) < len(per_class):
         print(f"      {len(per_class) - len(scored)} class(es) had no test clips "
@@ -386,21 +316,6 @@ def bias_audit(pred, y, classes, train_counts):
 
 
 def mean_pool_baselines(feats, labels, is_train, classes, seeds=(0, 1, 2, 3, 4)):
-    """Baselines on mean-pooled frames, i.e. with frame order discarded.
-
-    These are the comparison that matters. The temporal transformer is the
-    expensive option; if a mean-pooled classifier matches or beats it, the
-    temporal head is not earning its parameters.
-
-    Runs three models on identical splits:
-      plain logistic     - no class weighting, shows what imbalance does to a
-                           linear model left to its own devices
-      balanced logistic  - inverse-frequency weighting, isolates whether the
-                           collapse above is imbalance or capacity
-      MLP (512 hidden)   - unweighted, seed-replicated
-
-    Returns a dict of (overall, macro, head, tail, worst, n_zero) tuples.
-    """
     from sklearn.linear_model import LogisticRegression
     from sklearn.neural_network import MLPClassifier
 
@@ -440,12 +355,6 @@ def mean_pool_baselines(feats, labels, is_train, classes, seeds=(0, 1, 2, 3, 4))
 
 
 def benchmark_store(path=FEATURE_STORE, repeats=3):
-    """Group-by on the feature store, three ways.
-
-    Reports naive pandas and column-pruned pandas separately: most of the gap
-    against Polars is projection pushdown rather than engine speed, and a
-    pandas caller who passes columns= recovers nearly all of it.
-    """
     import polars as pl
     import pandas as pd
 
@@ -471,10 +380,6 @@ def benchmark_store(path=FEATURE_STORE, repeats=3):
             "speedup_vs_naive": t_naive / max(t_pl, 1e-9),
             "speedup_vs_fair": t_fair / max(t_pl, 1e-9)}
 
-
-# ---------------------------------------------------------------------------
-# Pipeline
-# ---------------------------------------------------------------------------
 def run(video_root="/content/ucf101", max_per_class=None, out_tag="", epochs=30):
     print("[1/8] finding videos")
     items = find_videos(video_root)
@@ -507,9 +412,6 @@ def run(video_root="/content/ucf101", max_per_class=None, out_tag="", epochs=30)
     feats, labels, paths, clip_model = extract_features(all_items)
     save_feature_store(feats, labels, paths, out=feature_store)
 
-    # Split by path membership, not by row count: extract_features skips clips
-    # OpenCV cannot read, so a positional boundary drifts and silently mixes
-    # training clips into the test set.
     train_paths = set(p for p, _ in train)
     is_tr = np.array([p in train_paths for p in paths])
     n_dropped = len(all_items) - len(paths)
@@ -578,8 +480,6 @@ def run(video_root="/content/ucf101", max_per_class=None, out_tag="", epochs=30)
 
 
 def smoke_test(video_root="/content/ucf101"):
-    """Run every stage on ~40 clips. Numbers are meaningless at this size; the
-    point is that a crash costs a minute rather than twenty."""
     global MAX_CLASSES, MIN_CLASS_CLIPS, IMBALANCE_FACTOR
     saved = (MAX_CLASSES, MIN_CLASS_CLIPS, IMBALANCE_FACTOR)
     MAX_CLASSES, MIN_CLASS_CLIPS, IMBALANCE_FACTOR = 4, 4, 3
